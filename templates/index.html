@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Live Detect (Basic)</title>
+  <style>
+    body{font-family:Arial;margin:12px;background:#eef2f7}
+    #wrap{display:flex;gap:12px}
+    #videoWrap{position:relative;width:640px;height:480px}
+    video{width:640px;height:480px;border-radius:6px;background:#000}
+    canvas{position:absolute;left:0;top:0;pointer-events:none}
+    #controls{min-width:320px}
+    button{padding:8px 12px;border-radius:6px;border:none;background:#2563eb;color:#fff}
+    #log{background:#111;color:#eee;padding:8px;height:240px;overflow:auto;font-family:monospace}
+  </style>
+</head>
+<body>
+  <h2>Live detection — user: {{ user }}</h2>
+  <div id="wrap">
+    <div id="videoWrap">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay" width="640" height="480"></canvas>
+    </div>
+    <div id="controls">
+      <div>Status: <span id="stat">idle</span></div>
+      <div style="margin-top:8px;">
+        <button id="start">Start Camera</button>
+        <button id="stop">Stop</button>
+        <div style="margin-top:8px;"><a href="/logout">Logout</a></div>
+      </div>
+      <h4 style="margin-top:12px">Server log</h4>
+      <div id="log"></div>
+    </div>
+  </div>
+
+<script>
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const ctx = overlay.getContext('2d');
+const logEl = document.getElementById('log');
+function log(msg){ logEl.innerText = new Date().toISOString() + ' ' + msg + '\n' + logEl.innerText; }
+
+let stream=null, intervalId=null;
+
+async function startCamera(){
+  log('Requesting camera');
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}, audio:false});
+    video.srcObject = stream;
+    await video.play();
+    document.getElementById('stat').innerText = 'camera ready';
+    log('camera started: ' + video.videoWidth + 'x' + video.videoHeight);
+    startSending();
+  }catch(e){
+    document.getElementById('stat').innerText='camera error';
+    log('camera error: '+(e.message||e.name));
+    alert('Camera error: '+(e.message||e.name));
+  }
+}
+
+function startSending(){
+  if(intervalId) return;
+  intervalId = setInterval(()=> {
+    if(video.readyState < 2) return;
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth || 640;
+    c.height = video.videoHeight || 480;
+    c.getContext('2d').drawImage(video,0,0,c.width,c.height);
+    c.toBlob(async (blob)=>{
+      try{
+        const fd = new FormData();
+        fd.append('image', blob, 'frame.jpg');
+        const res = await fetch('/detect', { method: 'POST', body: fd });
+        if(!res.ok){ log('server returned ' + res.status); return; }
+        const data = await res.json();
+        drawDetections(data.detections || []);
+        log('detections: ' + (data.detections ? data.detections.length : 0));
+      }catch(err){
+        log('send error: ' + (err.message || err));
+      }
+    }, 'image/jpeg', 0.7);
+  }, 300); // ~3 FPS
+}
+
+function stopCamera(){
+  if(intervalId){ clearInterval(intervalId); intervalId=null; }
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  video.srcObject = null;
+  ctx.clearRect(0,0,overlay.width, overlay.height);
+  document.getElementById('stat').innerText='stopped';
+  log('stopped camera');
+}
+
+function drawDetections(dets){
+  ctx.clearRect(0,0,overlay.width, overlay.height);
+  ctx.drawImage(video, 0, 0, overlay.width, overlay.height);
+  ctx.lineWidth = 2;
+  dets.forEach(d=>{
+    const [x1,y1,x2,y2] = d.bbox;
+    ctx.strokeStyle = 'lime';
+    ctx.strokeRect(x1,y1,x2-x1,y2-y1);
+    ctx.fillStyle = 'white';
+    ctx.font = '14px Arial';
+    ctx.fillText(d.class_name + ' ' + (d.confidence||0).toFixed(2), x1, Math.max(12, y1-4));
+  });
+}
+
+document.getElementById('start').onclick = startCamera;
+document.getElementById('stop').onclick = stopCamera;
+</script>
+</body>
+</html>
