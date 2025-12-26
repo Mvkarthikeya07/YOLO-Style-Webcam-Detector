@@ -197,6 +197,10 @@ Add dark/light theme switch
 M V Karthikeya
 YOLO-Style Webcam Detection — 2025
 
+📜 License
+
+This project is licensed under the MIT License.
+
 📦 Setup (Beginner Friendly)
 
 If you are new to Python or want an easy start:
